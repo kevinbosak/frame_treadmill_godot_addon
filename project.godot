@@ -11,9 +11,13 @@ config_version=5
 [application]
 
 config/name="Frame Walking Game"
-config/description="Mixed reality treadmill game for Steam Frame."
-run/main_scene="res://main.tscn"
+config/description="Treadmill game template for Steam Frame, built on Treadmill Frame XR Kit."
+run/main_scene="res://demo/forest_walk.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/treadmill_frame_xr_kit/plugin.cfg")
 
 [rendering]
 
