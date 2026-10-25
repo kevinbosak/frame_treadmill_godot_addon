@@ -72,6 +72,13 @@ walking, **[ / ]** simulated cadence, **Up/Down** look, **C** calibrate. The mou
 ## Reference
 
 ### TFXRig
+- `preferred_refresh_rate` (default 90): requested at startup if the headset offers it to the app,
+  unless the player picked a rate in Settings. On Steam Frame the app is usually only offered the
+  rate set in SteamOS's VR settings, so set 90 Hz there. The log says which rate it got.
+- `preparing_text`: shown on the dark screen the first time World view turns on. That first draw of
+  the world (with shadows) can freeze the picture for up to a second, so the rig fades to dark,
+  turns the world on and warms up behind it, waits for smooth frames (4 s at most), then fades in.
+  Later switches are instant.
 - `world_root: Node3D`: shown in World view. A `TFXPathWorld` is lined up with the treadmill,
   gets its theme's environment, and is fed the walking speed automatically.
 - `hud_extra_lines: PackedStringArray`: your lines on the walking panel.
@@ -96,8 +103,12 @@ walking, **[ / ]** simulated cadence, **Up/Down** look, **C** calibrate. The mou
     to −length. The same index must give the same scenery. The chunk is built outside the scene
     and swapped in when done, so you can spread heavy work with `await next_frame()` and avoid a
     hitch each time a stretch is recycled.
+  - `update(delta, speed)`: called every frame while shown, for animated touches (e.g. particles
+    drifting past at walking speed).
   - Helpers: `make_ground()` (shaders can use `instance uniform float path_offset`),
-    `make_sky_dome()`, `add_multimesh()`.
+    `make_sky_dome(top, horizon, sun_color, sun_dir, cloud_texture)` (pass a repeating greyscale
+    texture for drifting clouds; `sky_material` exposes `clouds` 0–1), `add_multimesh(..., custom)`
+    (one number per copy, read as `INSTANCE_CUSTOM.x`), `next_frame()`.
 
 ### Gaze
 - Add a `TFXGazeTarget` node (set `radius`, `dwell_required`, `max_distance`, optional
@@ -193,9 +204,20 @@ code, especially for `Label3D` text, which rebuilds its geometry on every change
 ## Rendering order (if you add transparent things)
 
 The bubble draws at render priority 100, after the world, so it can erase it. The walking panel
-(110–116), settings panel (115), reticle (120) and prompts (127) draw on top of it with depth
-testing off. Keep your own
-always-visible overlays above 100.
+(110–116), settings panel (115), laser pointer (118), reticle (120) and prompts (127) draw on top
+of it with depth testing off. Keep your own always-visible overlays above 100.
+
+The bubble also has a solid, slightly smaller box inside it. Solid things are drawn nearest
+first, so that box is drawn before the world, and the ground, grass and rocks behind it are
+skipped by the depth test instead of being drawn and then erased. That's free GPU time for
+whatever sits in the lower part of your view.
+
+## Keeping the GPU light
+
+The ground covers most of the view, so its shader matters most. Read as few textures as you can
+(pack several greyscale maps into one texture's channels), import them VRAM-compressed, and skip
+surface detail (normal maps) beyond about 10 m, where it can't be seen. The demo's ground does
+this: two texture reads per pixel, from `demo/textures/`.
 
 ## Tests
 

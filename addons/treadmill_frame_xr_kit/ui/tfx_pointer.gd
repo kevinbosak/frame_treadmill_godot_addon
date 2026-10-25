@@ -22,6 +22,11 @@ func _ready() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color(0.5, 0.85, 1.0)
+	# Drawn after the see-through bubble (and over the settings panel), so the
+	# beam stays visible where it passes in front of the real world.
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.no_depth_test = true
+	mat.render_priority = TFXPassthroughBubble.RENDER_PRIORITY + 18
 	var beam := BoxMesh.new()
 	beam.size = Vector3(0.002, 0.002, 1.0)
 	beam.material = mat

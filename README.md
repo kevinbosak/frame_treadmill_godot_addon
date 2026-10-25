@@ -70,8 +70,20 @@ budget, draw calls, triangles) and settings that apply at once:
 - sun shadows and shadow distance
 - scenery density
 
-The **Forest** tab switches the demo's look options on and off: tree shading, wind sway, soft fake
-shadows under trees, ground detail, and real lantern lights.
+The **Forest** tab switches the demo's look options on and off:
+
+- textured ground (generated grass and dirt textures with surface detail)
+- rolling hills
+- grass tufts along the road
+- drifting clouds
+- ground mist
+- fireflies and floating pollen
+- tree shading
+- wind sway
+- soft fake shadows under trees
+- real lantern lights
+
+All textures are generated with Godot's noise tools, so there are no image files.
 
 Settings stay open in World view, so you can see the effect. Try each change, and compare the GPU
 figure with the budget, which is 13.9 ms at 72 Hz.

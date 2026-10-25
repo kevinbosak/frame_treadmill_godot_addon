@@ -241,6 +241,7 @@ func set_world_root(node: Node3D) -> void:
 		var path := node as TFXPathWorld
 		graphics.path_world = path
 		settings_menu.set_theme_options(path.theme if path else null)
+		graphics.log_settings_snapshot("startup")
 		set_world_view(world_view)
 
 
@@ -283,7 +284,9 @@ func _apply_world_view(on: bool) -> void:
 		env.ambient_light_energy = _default_env.ambient_light_energy
 	audio.set_world_audible(on)
 	if changed:
-		TFXGraphics.note("world view on" if on else "world view off")
+		TFXGraphics.log_event("world view on" if on else "world view off")
+		if on:
+			graphics.log_settings_snapshot("world view on")
 		view_changed.emit(on)
 
 
@@ -291,7 +294,7 @@ func _apply_world_view(on: bool) -> void:
 ## behind the dark screen, wait until frames run smoothly, then fade in.
 func _prepare_world() -> void:
 	_preparing = true
-	TFXGraphics.note("preparing world")
+	TFXGraphics.log_event("preparing world")
 	await _fade_to(1.0, 0.25)
 	_show_prompt(preparing_text)
 	_apply_world_view(true)
@@ -414,12 +417,14 @@ func open_settings() -> void:
 	settings_panel.global_transform = Transform3D(Basis(Vector3.UP, atan2(-fwd.x, -fwd.y)), pos)
 	settings_menu.refresh()
 	settings_panel.visible = true
-	TFXGraphics.note("settings opened")
+	TFXGraphics.log_event("settings opened")
 	hud.visible = false  # the menu shows live cadence itself
 	menu_open = true
 
 
 func close_settings() -> void:
+	if menu_open:
+		TFXGraphics.log_event("settings closed")
 	settings_panel.visible = false
 	hud.visible = true
 	menu_open = false
@@ -460,6 +465,7 @@ func _finish_measuring(f: TFXFootprint) -> void:
 	treadmill.set_footprint(f)
 	_clear_markers()
 	_place_hud()
+	TFXGraphics.log_event("treadmill measured %.2f x %.2f m" % [f.width, f.length])
 	treadmill_measured.emit(f)
 
 
@@ -477,6 +483,9 @@ func _add_marker(p: Vector3) -> void:
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color(1, 0.8, 0.1)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.no_depth_test = true
+	mat.render_priority = TFXPassthroughBubble.RENDER_PRIORITY + 10   # over the bubble
 	s.material = mat
 	m.mesh = s
 	add_child(m)

@@ -27,12 +27,20 @@ void fragment() {
 }
 """
 
+## Gradient sky with a sun, and an optional drifting cloud layer: a repeating
+## noise texture projected onto a high ceiling, thinned out towards the horizon
+## and lit warmer on the sun's side. Two texture reads per sky pixel.
 const SKY_SHADER := """shader_type spatial;
 render_mode unshaded, fog_disabled, cull_disabled;
 uniform vec3 top_color : source_color;
 uniform vec3 horizon_color : source_color;
 uniform vec3 sun_color : source_color;
 uniform vec3 sun_dir;
+uniform sampler2D cloud_tex : filter_linear_mipmap, repeat_enable;
+uniform float clouds = 0.0;
+uniform float cloud_cover = 0.48;
+uniform vec3 cloud_light : source_color = vec3(1.0, 0.85, 0.75);
+uniform vec3 cloud_shade : source_color = vec3(0.35, 0.33, 0.45);
 varying vec3 dir;
 
 void vertex() { dir = normalize(VERTEX); }
@@ -42,6 +50,14 @@ void fragment() {
 	vec3 c = mix(horizon_color, top_color, smoothstep(0.0, 0.55, d.y));
 	float s = max(dot(d, normalize(sun_dir)), 0.0);
 	c += sun_color * (smoothstep(0.9985, 0.9995, s) * 1.5 + pow(s, 12.0) * 0.35);
+	if (clouds > 0.0 && d.y > 0.0) {
+		vec2 uv = d.xz / (d.y + 0.12) * 0.22 + vec2(TIME * 0.0035, TIME * 0.0012);
+		float n = texture(cloud_tex, uv).r * 0.7 + texture(cloud_tex, uv * 2.9 + 0.37).r * 0.3;
+		float cover = smoothstep(cloud_cover, cloud_cover + 0.22, n);
+		float fade = smoothstep(0.02, 0.22, d.y);
+		vec3 cloud = mix(cloud_shade, cloud_light, 0.3 + 0.7 * pow(s, 2.0) * (1.0 - n * 0.4));
+		c = mix(c, cloud, cover * fade * clouds);
+	}
 	ALBEDO = c;
 }
 """
@@ -54,6 +70,9 @@ var density := 1.0
 var sun: DirectionalLight3D
 ## Current values of the theme's options (key -> bool).
 var options := {}
+
+## The sky dome's material (from make_sky_dome()), e.g. to turn clouds on and off.
+var sky_material: ShaderMaterial
 
 var _grid_material: ShaderMaterial
 var _ground_mesh := PlaneMesh.new()
@@ -89,6 +108,12 @@ func populate(chunk: Node3D, index: int, length: float) -> Array[TFXGazeTarget]:
 		_grid_material.shader = shader
 	chunk.add_child(make_ground(_grid_material, index, length, 160.0))
 	return []
+
+
+## Called every frame by the path world while it's shown, with the walking speed
+## (m/s). For animated touches such as particles drifting past at your speed.
+func update(_delta: float, _speed: float) -> void:
+	pass
 
 
 ## Look switches this theme offers, shown in Settings. Each entry:
@@ -136,7 +161,10 @@ func make_ground(material: Material, index: int, length: float, width: float) ->
 
 ## An opaque gradient sky with a sun. It has to be opaque: in the headset the
 ## background is passthrough, so without it the room would show in the sky.
-func make_sky_dome(top: Color, horizon: Color, sun_color: Color, sun_dir: Vector3) -> MeshInstance3D:
+## Pass a repeating greyscale texture to get drifting clouds (set the material's
+## "clouds" parameter to 0 to hide them).
+func make_sky_dome(top: Color, horizon: Color, sun_color: Color, sun_dir: Vector3,
+		cloud_texture: Texture2D = null) -> MeshInstance3D:
 	var sky := MeshInstance3D.new()
 	var dome := SphereMesh.new()
 	dome.radius = 400.0
@@ -151,6 +179,10 @@ func make_sky_dome(top: Color, horizon: Color, sun_color: Color, sun_dir: Vector
 	mat.set_shader_parameter("horizon_color", horizon)
 	mat.set_shader_parameter("sun_color", sun_color)
 	mat.set_shader_parameter("sun_dir", sun_dir)
+	if cloud_texture:
+		mat.set_shader_parameter("cloud_tex", cloud_texture)
+		mat.set_shader_parameter("clouds", 1.0)
+	sky_material = mat
 	dome.material = mat
 	sky.mesh = dome
 	sky.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -158,19 +190,24 @@ func make_sky_dome(top: Color, horizon: Color, sun_color: Color, sun_dir: Vector
 
 
 ## Many copies of one mesh in a single draw call, each with its own transform
-## and colour (the material should use vertex colour as albedo).
+## and colour (the material should use vertex colour as albedo). Optional
+## `custom` gives each copy one number, readable as INSTANCE_CUSTOM.x in a
+## shader (e.g. the ground height under a tree).
 func add_multimesh(parent: Node3D, mesh: Mesh, xforms: Array[Transform3D],
-		colors: Array[Color], material: Material) -> void:
+		colors: Array[Color], material: Material, custom := PackedFloat32Array()) -> void:
 	if xforms.is_empty():
 		return
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = true
+	mm.use_custom_data = not custom.is_empty()
 	mm.mesh = mesh
 	mm.instance_count = xforms.size()
 	for i in xforms.size():
 		mm.set_instance_transform(i, xforms[i])
 		mm.set_instance_color(i, colors[i])
+		if mm.use_custom_data:
+			mm.set_instance_custom_data(i, Color(custom[i], 0, 0, 0))
 	var mmi := MultiMeshInstance3D.new()
 	mmi.multimesh = mm
 	mmi.material_override = material

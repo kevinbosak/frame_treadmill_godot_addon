@@ -13,7 +13,11 @@ extends Node
 ## reports the worst frame of the last second, refreshed once a second.)
 ##
 ## Log: every LOG_INTERVAL seconds a "[tfx perf]" line goes to the log with the
-## averages and the worst single frames since the previous line. On the headset:
+## averages and the worst single frames since the previous line. Every settings
+## change is logged as "[tfx setting] grass = off", a full "[tfx settings]"
+## snapshot is logged at startup and whenever World view turns on, and events
+## such as opening settings as "[tfx event]". So costs can be matched to
+## settings afterwards. On the headset:
 ##   adb logcat -s godot > perf_log.txt
 ##
 ## Hitches: a frame that takes far longer than the budget is logged with the
@@ -92,6 +96,8 @@ var _log_gpu_max := 0.0
 var _log_frame_max := 0.0
 var _log_game_max := 0.0
 var _log_hitches := 0
+var _logged_settings := {}   # last logged value of each setting
+var _logged_rate := 0
 
 
 ## Runs first and last in every frame, to time the game code in between.
@@ -166,6 +172,9 @@ func _process(delta: float) -> void:
 	objects = int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME))
 	var rate := xr.get_display_refresh_rate() if xr else 0.0
 	budget_ms = 1000.0 / rate if rate > 1.0 else 1000.0 / 60.0
+	if rate > 1.0 and roundi(rate) != _logged_rate:
+		_logged_rate = roundi(rate)
+		print("[tfx setting] refresh rate = %d Hz" % _logged_rate)
 
 
 ## The real time the last frame took (ms), unsmoothed.
@@ -204,6 +213,51 @@ func hitch_summary() -> String:
 			", ".join(events) if events.size() > 0 else "nothing noted"]
 
 
+## Notes an event and also writes it to the log ("[tfx event] ...").
+static func log_event(text: String) -> void:
+	print("[tfx event] ", text)
+	note(text)
+
+
+## Every graphics setting and theme option, as name -> value text.
+func current_settings() -> Dictionary:
+	var out := {
+		"msaa": "off" if msaa == 0 else "%dx" % msaa,
+		"foveation": FOVEATION_NAMES[clampi(foveation, 0, 3)] if is_foveation_supported() else "n/a",
+		"render scale": "%d%%" % roundi(render_scale * 100.0),
+		"tone mapping": TONEMAP_NAMES[clampi(tonemap, 0, TONEMAP_NAMES.size() - 1)],
+		"sun shadows": ("on, %d m" % roundi(shadow_distance)) if shadows else "off",
+		"density": "%.1fx" % density,
+	}
+	if path_world and path_world.theme:
+		for o in path_world.theme.get_options():
+			out[o.key] = "on" if path_world.theme.option(o.key) else "off"
+	return out
+
+
+## Logs every setting on one line.
+func log_settings_snapshot(reason: String) -> void:
+	var settings := current_settings()
+	var parts: PackedStringArray = []
+	for key in settings:
+		parts.append("%s=%s" % [key, settings[key]])
+	print("[tfx settings] (%s) %s" % [reason, ", ".join(parts)])
+	_logged_settings = settings
+
+
+## Logs any setting that changed since it was last logged.
+func _log_changed_settings() -> void:
+	var settings := current_settings()
+	if _logged_settings.is_empty():
+		_logged_settings = settings
+		return
+	for key in settings:
+		if _logged_settings.has(key) and _logged_settings[key] != settings[key]:
+			print("[tfx setting] %s = %s" % [key, settings[key]])
+			note("%s %s" % [key, settings[key]])
+	_logged_settings = settings
+
+
 ## Records something that happened, so hitches can be traced back to it.
 static func note(text: String) -> void:
 	if instance:
@@ -214,9 +268,11 @@ static func note(text: String) -> void:
 
 func _record_hitch(ms: float) -> void:
 	var now := Time.get_ticks_msec()
+	# Look back from when the slow frame started, not from now.
+	var window_start := now - int(ms) - 700
 	var counts := {}   # event -> times, in first-seen order
 	for e in _events:
-		if now - e[0] <= 700:
+		if e[0] >= window_start:
 			counts[e[1]] = counts.get(e[1], 0) + 1
 	var recent: PackedStringArray = []
 	for text in counts:
@@ -259,7 +315,7 @@ func apply() -> void:
 		if not is_equal_approx(theme.density, density):
 			theme.density = density
 			path_world.rebuild()
-	note("graphics settings applied")
+	_log_changed_settings()
 	changed.emit()
 
 
@@ -277,6 +333,7 @@ func set_theme_option(key: String, value: bool) -> void:
 		for o in path_world.theme.get_options():
 			if o.key == key and o.get("rebuild", false):
 				path_world.rebuild()
+	_log_changed_settings()
 	save_settings()
 	changed.emit()
 

@@ -23,9 +23,24 @@ void fragment() {
 }
 """
 
+## Saves GPU time: an ordinary solid box, a little smaller than the hole, drawn
+## before the world. Anything behind it (the ground, grass and rocks under the
+## see-through area) then fails the depth test and is never shaded, instead of
+## being fully drawn and erased a moment later. The hole box still makes it
+## transparent.
+const OCCLUDER_SHADER := """shader_type spatial;
+render_mode unshaded, cull_back, shadows_disabled, fog_disabled;
+
+void fragment() {
+	ALBEDO = vec3(0.0);
+}
+"""
+const OCCLUDER_INSET := 0.01   # m, keeps it just behind the hole's faces
+
 const RENDER_PRIORITY := 100
 
 var _box := BoxMesh.new()
+var _occluder_box := BoxMesh.new()
 
 
 func _ready() -> void:
@@ -40,6 +55,19 @@ func _ready() -> void:
 	material_override = mat
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
+	# Solid boxes are drawn nearest first, and this one is right in front of
+	# you, so it's drawn before the world without any extra setup.
+	var occluder := MeshInstance3D.new()
+	occluder.name = "Occluder"
+	occluder.mesh = _occluder_box
+	var occ_shader := Shader.new()
+	occ_shader.code = OCCLUDER_SHADER
+	var occ_mat := ShaderMaterial.new()
+	occ_mat.shader = occ_shader
+	occluder.material_override = occ_mat
+	occluder.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(occluder)
+
 
 ## Sizes and places the box around the measured belt.
 func fit(f: TFXFootprint, height_above_belt: float) -> void:
@@ -47,6 +75,7 @@ func fit(f: TFXFootprint, height_above_belt: float) -> void:
 	var top := f.belt_height + height_above_belt
 	_box.size = Vector3(f.width + 2.0 * SIDE_MARGIN, top - bottom,
 			f.length + FRONT_MARGIN + BACK_MARGIN)
+	_occluder_box.size = (_box.size - Vector3.ONE * 2.0 * OCCLUDER_INSET).max(Vector3.ONE * 0.01)
 	var mid := f.center + f.forward * (FRONT_MARGIN - BACK_MARGIN) / 2.0
 	global_transform = Transform3D(Basis(Vector3.UP, atan2(-f.forward.x, -f.forward.y)),
 			Vector3(mid.x, (top + bottom) / 2.0, mid.y))

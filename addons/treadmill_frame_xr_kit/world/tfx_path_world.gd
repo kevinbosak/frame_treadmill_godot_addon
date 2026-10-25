@@ -58,6 +58,7 @@ func _process(delta: float) -> void:
 		return
 	var ds := speed * delta
 	distance += ds
+	theme.update(delta, speed)
 	var count := _chunks.size()
 	for i in count:
 		var chunk := _chunks[i]
