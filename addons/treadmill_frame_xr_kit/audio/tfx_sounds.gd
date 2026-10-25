@@ -1,5 +1,5 @@
 class_name TFXSounds
-## Small sounds made in code, so the project needs no audio files yet.
+## Treadmill Frame XR Kit: small sounds made in code (footstep, chime).
 
 
 ## A soft gravel crunch for each step.

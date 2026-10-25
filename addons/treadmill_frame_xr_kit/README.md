@@ -18,11 +18,13 @@ License: MIT (see `LICENSE`).
 | Stride calibration | `TFXStrideCalibration` | Learns step length per cadence from known treadmill speeds |
 | Treadmill footprint | `TFXFootprint` | Belt position and size from three touched points |
 | Safety bubble | `TFXPassthroughBubble` · `rig/` | See-through box around the treadmill in World view |
-| Settings screen | `TFXSettingsMenu` · `ui/` | Tabs: Treadmill, Stride, Display, Headset, plus your own |
+| Settings screen | `TFXSettingsMenu` · `ui/` | Tabs: Treadmill, Stride, Display, Sound, Headset, plus your own |
 | 3D UI + pointer | `TFXUiPanel3D`, `TFXPointer` | Any Control UI on a panel in 3D, with laser pointers |
 | Step graph | `TFXBobWaveform` | Live head bob graph on the walking panel |
 | Gaze | `TFXGazeTracker`, `TFXGazeTarget`, `TFXGazeReticle` · `gaze/` | What you're looking at (eyes, then head direction, then mouse), noticing by dwell, a reticle that never covers the target |
 | Path world | `TFXPathWorld`, `TFXPathTheme` · `world/` | Endless recycled path that moves at your speed; themes decide the look |
+| Audio | `TFXAudio` · `audio/` | Buses (Ambience, World, Effects), volumes, muting outside World view, pool of binaural processors |
+| Spatial sound | `TFXSpatialSound` · `audio/` | A positional sound you can place by ear: per-ear delay and behind-the-head muffling on top of Godot's 3D audio |
 | Sounds | `TFXSounds` · `audio/` | Footstep and chime sounds made in code |
 
 ## Quick start
@@ -100,6 +102,32 @@ walking, **[ / ]** simulated cadence, **Up/Down** look, **C** calibrate. The mou
 - `rig.gaze.target_noticed(target)`; `rig.gaze.source` is "eye tracking", "head direction" or "mouse".
   Head direction gets a wider tolerance (4° instead of 2°).
 
+### Sound
+- **Buses:** `TFXAudio.AMBIENCE` for background beds (not positional), `TFXAudio.WORLD` for
+  positional sounds (with a light outdoor reverb), and `TFXAudio.EFFECTS` for footsteps and
+  interface sounds. Ambience and World are muted outside World view. Volumes and the binaural
+  switch are in Settings → Sound and saved.
+- **Positional sounds:** use `TFXSpatialSound` instead of `AudioStreamPlayer3D`. It routes to the
+  World bus and, while playing within `binaural_range` (25 m), borrows one of 12 binaural
+  processors. Each one:
+  - delays the far ear by up to ~0.65 ms (Woodworth head model): the time difference between ears,
+  - muffles sounds behind you (low-pass down to 3.5 kHz): front versus back,
+  - with Godot's own panning (set to about 9 dB between ears for a sound at the side), distance
+    falloff, air absorption and Doppler.
+  It's an approximation, not full HRTF: elevation cues are weak. A Steam Audio GDExtension doesn't
+  exist yet for Android arm64, the Frame's build target. `TFXSpatialSound.cues_for()` is the model
+  if you want to tune it.
+
+```gdscript
+var buzz := TFXSpatialSound.new()
+buzz.stream = preload("res://sounds/bee.wav")   # a looping mono sound
+buzz.unit_size = 1.2                             # loudness: about 0 dB at this distance
+buzz.autoplay = true
+bee.add_child(buzz)
+```
+
+Use mono sound files for positional sounds; a stereo file can't be placed.
+
 ### Settings screen
 ```gdscript
 var tab := rig.settings_menu.add_tab("My game")
@@ -122,7 +150,10 @@ always-visible overlays above 100.
 godot --headless --script res://addons/treadmill_frame_xr_kit/tests/test_step_detector.gd
 godot --headless --script res://addons/treadmill_frame_xr_kit/tests/test_footprint.gd
 godot --headless --script res://addons/treadmill_frame_xr_kit/tests/test_gaze.gd
+godot --headless --script res://addons/treadmill_frame_xr_kit/tests/test_spatial_audio.gd
 ```
+The spatial audio test captures Godot's actual output for a sound at your right: about 9 dB louder
+in the right ear and 0.63 ms later in the left; behind you it comes out duller.
 
 ## Known limits
 

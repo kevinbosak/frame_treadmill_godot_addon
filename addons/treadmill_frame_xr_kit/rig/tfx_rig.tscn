@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://addons/treadmill_frame_xr_kit/rig/tfx_rig.gd" id="1_rig"]
 [ext_resource type="Script" path="res://addons/treadmill_frame_xr_kit/ui/tfx_bob_waveform.gd" id="2_wave"]
@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://addons/treadmill_frame_xr_kit/ui/tfx_pointer.gd" id="6_pointer"]
 [ext_resource type="Script" path="res://addons/treadmill_frame_xr_kit/gaze/tfx_gaze_tracker.gd" id="7_gaze"]
 [ext_resource type="Script" path="res://addons/treadmill_frame_xr_kit/gaze/tfx_gaze_reticle.gd" id="8_reticle"]
+[ext_resource type="Script" path="res://addons/treadmill_frame_xr_kit/audio/tfx_audio.gd" id="9_audio"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_hand"]
 size = Vector3(0.04, 0.04, 0.12)
@@ -37,6 +38,9 @@ environment = SubResource("Environment_rig")
 
 [node name="DefaultLight" type="DirectionalLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 3, 0)
+
+[node name="Audio" type="Node" parent="."]
+script = ExtResource("9_audio")
 
 [node name="Treadmill" type="Node" parent="."]
 script = ExtResource("3_treadmill")

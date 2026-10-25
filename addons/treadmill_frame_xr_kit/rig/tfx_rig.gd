@@ -5,7 +5,8 @@ extends Node3D
 ## Instance tfx_rig.tscn in your main scene. It brings the headset and controllers,
 ## passthrough, step counting and speed (TFXTreadmill), treadmill measuring, the
 ## see-through safety bubble, edge warnings, the walking panel (HUD), settings
-## screen, laser pointers, gaze tracking with a reticle, and footstep sounds.
+## screen, laser pointers, gaze tracking with a reticle, and sound: audio buses,
+## volumes, binaural positional audio (TFXSpatialSound) and footsteps.
 ##
 ## Your game provides the world: set `world_root` to the node to show in World
 ## view (a TFXPathWorld is lined up with the treadmill and fed the walking speed
@@ -65,6 +66,7 @@ const MEASURE_STEPS := [
 @onready var waveform: TFXBobWaveform = $Hud/Waveform
 @onready var hud_panel: MeshInstance3D = $Hud/Panel
 @onready var step_player: AudioStreamPlayer = $StepSound
+@onready var audio: TFXAudio = $Audio
 
 var xr_interface: OpenXRInterface
 var xr_active := false
@@ -119,6 +121,8 @@ func _ready() -> void:
 	reticle.tracker = gaze
 	_add_gaze_depth_surface()
 	step_player.stream = TFXSounds.footstep()
+	step_player.bus = TFXAudio.EFFECTS
+	_apply_sound_settings()
 
 	_default_env = world_env.environment.duplicate()
 	set_world_view(false)
@@ -210,6 +214,7 @@ func set_world_view(on: bool) -> void:
 		env.ambient_light_source = _default_env.ambient_light_source
 		env.ambient_light_color = _default_env.ambient_light_color
 		env.ambient_light_energy = _default_env.ambient_light_energy
+	audio.set_world_audible(on)
 	if changed:
 		view_changed.emit(on)
 
@@ -217,6 +222,13 @@ func set_world_view(on: bool) -> void:
 func _on_settings_changed() -> void:
 	if bubble.visible:
 		bubble.fit(treadmill.footprint, treadmill.bubble_height)
+	_apply_sound_settings()
+
+
+func _apply_sound_settings() -> void:
+	audio.set_volumes(treadmill.volume_master, treadmill.volume_ambience,
+			treadmill.volume_world, treadmill.volume_effects)
+	audio.binaural_enabled = treadmill.binaural_audio
 
 
 # --- Settings ----------------------------------------------------------------------

@@ -2,7 +2,7 @@ class_name TFXSettingsMenu
 extends PanelContainer
 ## Treadmill Frame XR Kit: the settings screen.
 ##
-## Built-in tabs: Treadmill, Stride, Display and Headset; kit settings are saved
+## Built-in tabs: Treadmill, Stride, Display, Sound and Headset; kit settings are saved
 ## on the headset at once. Games add their own tabs with add_tab() and fill them
 ## with add_heading(), add_label(), add_button(), add_toggle() and add_stepper()
 ## (game settings are the game's to save).
@@ -68,6 +68,7 @@ func _ready() -> void:
 	_build_treadmill_tab(_tab(tabs, "Treadmill"))
 	_build_stride_tab(_tab(tabs, "Stride"))
 	_build_display_tab(_tab(tabs, "Display"))
+	_build_sound_tab(_tab(tabs, "Sound"))
 	_build_headset_tab(_tab(tabs, "Headset"))
 
 	treadmill.settings_changed.connect(refresh)
@@ -113,11 +114,30 @@ func _build_stride_tab(tab: VBoxContainer) -> void:
 
 
 func _build_display_tab(tab: VBoxContainer) -> void:
-	_heading(tab, "Display and sound")
+	_heading(tab, "Display")
 	_toggle(tab, "Show step graph", treadmill.show_step_graph,
 			func(on: bool) -> void: treadmill.show_step_graph = on)
 	_toggle(tab, "Show gaze reticle", treadmill.show_reticle,
 			func(on: bool) -> void: treadmill.show_reticle = on)
+
+
+func _build_sound_tab(tab: VBoxContainer) -> void:
+	_heading(tab, "Volume")
+	_stepper(tab, "Overall", 0.1, 0.0, 1.0,
+			func() -> float: return treadmill.volume_master,
+			func(v: float) -> void: treadmill.volume_master = v, _percent)
+	_stepper(tab, "Background (wind, distant sounds)", 0.1, 0.0, 1.0,
+			func() -> float: return treadmill.volume_ambience,
+			func(v: float) -> void: treadmill.volume_ambience = v, _percent)
+	_stepper(tab, "World sounds (birds, creatures)", 0.1, 0.0, 1.0,
+			func() -> float: return treadmill.volume_world,
+			func(v: float) -> void: treadmill.volume_world = v, _percent)
+	_stepper(tab, "Effects (footsteps, chimes)", 0.1, 0.0, 1.0,
+			func() -> float: return treadmill.volume_effects,
+			func(v: float) -> void: treadmill.volume_effects = v, _percent)
+	_heading(tab, "Spatial sound")
+	_toggle(tab, "Binaural cues (switch off to compare)", treadmill.binaural_audio,
+			func(on: bool) -> void: treadmill.binaural_audio = on)
 	_toggle(tab, "Footstep sounds", treadmill.footstep_sounds,
 			func(on: bool) -> void: treadmill.footstep_sounds = on)
 
@@ -338,6 +358,10 @@ func add_stepper(parent: Container, text: String, step: float, lo: float, hi: fl
 		getter: Callable, setter: Callable, fmt: Callable) -> void:
 	_stepper(parent, text, step, lo, hi, getter, setter, fmt, false)
 	refresh()
+
+
+static func _percent(v: float) -> String:
+	return "%d%%" % roundi(v * 100.0)
 
 
 static func _cm(v: float) -> String:

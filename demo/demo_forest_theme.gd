@@ -1,6 +1,7 @@
 class_name DemoForestTheme
 extends TFXPathTheme
-## Demo theme: "dusk forest road", with rune-marked waystones for the gaze test.
+## Demo theme: "dusk forest road", with rune-marked waystones for the gaze test,
+## songbirds in the trees and crickets in the grass (positional sound).
 ## An example TFXPathTheme subclass: overrides build_backdrop(),
 ## apply_environment() and populate(), and uses the base class helpers.
 
@@ -213,7 +214,29 @@ func populate(chunk: Node3D, index: int, length: float) -> Array[TFXGazeTarget]:
 	lantern.position = Vector3(side * 2.1, 1.6, -length * 0.5)
 	chunk.add_child(lantern)
 
+	_add_sounds(chunk, rng, length)
 	return [_waystone(chunk, rng, length)]
+
+
+## A cricket in the grass by the road, and usually a songbird up in a tree. They
+## scroll past with the path, so you hear them go by on your left or right.
+func _add_sounds(chunk: Node3D, rng: RandomNumberGenerator, length: float) -> void:
+	var cricket := TFXSpatialSound.new()
+	cricket.stream = DemoSounds.CRICKET
+	cricket.unit_size = 1.6
+	cricket.max_distance = 30.0
+	cricket.pitch_scale = rng.randf_range(0.94, 1.06)
+	cricket.autoplay = true
+	var side := -1.0 if rng.randf() < 0.5 else 1.0
+	cricket.position = Vector3(side * rng.randf_range(2.2, 5.0), 0.1, -rng.randf() * length)
+	chunk.add_child(cricket)
+	if rng.randf() < 0.75:
+		var bird := DemoSongbird.new()
+		bird.call_index = rng.randi()
+		side = -1.0 if rng.randf() < 0.5 else 1.0
+		bird.position = Vector3(side * rng.randf_range(5.0, 18.0), rng.randf_range(3.0, 6.0),
+				-rng.randf() * length)
+		chunk.add_child(bird)
 
 
 ## Eye-tracking test object: a rune-marked stone, sometimes obvious, sometimes hidden.

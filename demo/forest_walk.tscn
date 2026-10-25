@@ -15,3 +15,6 @@ script = ExtResource("3_world")
 
 [node name="Chime" type="AudioStreamPlayer" parent="."]
 volume_db = -6.0
+
+[node name="Ambience" type="AudioStreamPlayer" parent="."]
+volume_db = -4.0

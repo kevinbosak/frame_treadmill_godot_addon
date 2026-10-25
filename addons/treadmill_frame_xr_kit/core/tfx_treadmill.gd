@@ -31,6 +31,13 @@ var bubble_height := 1.1
 var show_step_graph := true
 var show_reticle := true
 var footstep_sounds := true
+## Volumes, 0..1.
+var volume_master := 1.0
+var volume_ambience := 0.7
+var volume_world := 1.0
+var volume_effects := 0.8
+## Per-ear delay and behind-the-head muffling for positional sounds.
+var binaural_audio := true
 ## Display refresh rate chosen in Settings (Hz); 0 = headset default.
 var refresh_rate := 0.0
 ## Everything you've ever walked in the app (m). Saved.
@@ -157,6 +164,11 @@ func save_settings() -> void:
 	cfg.set_value("display", "show_reticle", show_reticle)
 	cfg.set_value("display", "footstep_sounds", footstep_sounds)
 	cfg.set_value("display", "refresh_rate", refresh_rate)
+	cfg.set_value("sound", "volume_master", volume_master)
+	cfg.set_value("sound", "volume_ambience", volume_ambience)
+	cfg.set_value("sound", "volume_world", volume_world)
+	cfg.set_value("sound", "volume_effects", volume_effects)
+	cfg.set_value("sound", "binaural_audio", binaural_audio)
 	cfg.set_value("progress", "lifetime_distance", lifetime_distance)
 	cfg.set_value("treadmill", "footprint", footprint.to_dict())
 	cfg.save(SAVE_PATH)
@@ -183,6 +195,11 @@ func _read(cfg: ConfigFile) -> void:
 	show_reticle = cfg.get_value("display", "show_reticle", show_reticle)
 	footstep_sounds = cfg.get_value("display", "footstep_sounds", footstep_sounds)
 	refresh_rate = cfg.get_value("display", "refresh_rate", refresh_rate)
+	volume_master = cfg.get_value("sound", "volume_master", volume_master)
+	volume_ambience = cfg.get_value("sound", "volume_ambience", volume_ambience)
+	volume_world = cfg.get_value("sound", "volume_world", volume_world)
+	volume_effects = cfg.get_value("sound", "volume_effects", volume_effects)
+	binaural_audio = cfg.get_value("sound", "binaural_audio", binaural_audio)
 	lifetime_distance = cfg.get_value("progress", "lifetime_distance", lifetime_distance)
 	footprint = TFXFootprint.from_dict(cfg.get_value("treadmill", "footprint", {}))
 
