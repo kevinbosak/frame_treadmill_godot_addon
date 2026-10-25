@@ -18,6 +18,7 @@ var _lines := ImmediateMesh.new()
 var _radius := 0.1
 var _center := Vector3.ZERO
 var _have := false
+var _drawn_state := ""
 
 
 func _ready() -> void:
@@ -51,8 +52,14 @@ func _process(delta: float) -> void:
 
 	var to_cam := tracker.camera.global_position - _center
 	var up := Vector3.UP if absf(to_cam.normalized().y) < 0.98 else Vector3.FORWARD
-	global_transform = Transform3D(Basis.looking_at(to_cam, up), _center)
-	_draw(t)
+	global_transform = Transform3D(Basis.looking_at(to_cam, up).scaled(Vector3.ONE * _radius), _center)
+	# The geometry is a unit-size ring; only rebuild it when its look changes.
+	var state := "none"
+	if t:
+		state = "done" if t.noticed else "focus%d" % roundi(t.progress() * 24.0)
+	if state != _drawn_state:
+		_drawn_state = state
+		_draw(t)
 
 
 func _draw(t: TFXGazeTarget) -> void:
@@ -61,13 +68,13 @@ func _draw(t: TFXGazeTarget) -> void:
 	var color := IDLE_COLOR
 	if t:
 		color = DONE_COLOR if t.noticed else FOCUS_COLOR
-	var thickness := _radius * 0.16
+	var thickness := 0.16
 	var step := 360.0 / SEGMENTS
 	for i in SEGMENTS:
 		var start := i * step + (step - ARC_DEG) / 2.0 + 45.0
-		_arc(_radius, thickness, start, ARC_DEG, color)
+		_arc(1.0, thickness, start, ARC_DEG, color)
 	if t and not t.noticed and t.progress() > 0.0:
-		_arc(_radius * 1.3, thickness * 0.8, 90.0, -360.0 * t.progress(), FOCUS_COLOR)
+		_arc(1.3, thickness * 0.8, 90.0, -360.0 * t.progress(), FOCUS_COLOR)
 	_lines.surface_end()
 
 

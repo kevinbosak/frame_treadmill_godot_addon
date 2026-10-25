@@ -7,6 +7,11 @@ extends RefCounted
 ## The helpers at the bottom (sky dome, batched meshes) are for subclasses.
 ##
 ## Coordinates: the path runs along local -Z, centred on x = 0, ground at y = 0.
+##
+## Graphics hooks (used by Settings → Graphics and Look):
+##   density   scales how much scenery populate() adds (1.0 = normal).
+##   sun       the theme's main light; set it in build_backdrop() so shadows work.
+##   get_options() / set_option()  optional look switches a theme offers.
 
 const GRID_SHADER := """shader_type spatial;
 instance uniform float path_offset = 0.0;
@@ -41,6 +46,15 @@ void fragment() {
 }
 """
 
+## Name shown on the theme's settings tab.
+var display_name := "Look"
+## How much scenery to add; populate() should multiply its counts by this.
+var density := 1.0
+## The main light. Set in build_backdrop(); the kit turns its shadows on and off.
+var sun: DirectionalLight3D
+## Current values of the theme's options (key -> bool).
+var options := {}
+
 var _grid_material: ShaderMaterial
 var _ground_mesh := PlaneMesh.new()
 
@@ -49,7 +63,7 @@ var _ground_mesh := PlaneMesh.new()
 func build_backdrop(parent: Node3D) -> void:
 	parent.add_child(make_sky_dome(Color(0.35, 0.55, 0.9), Color(0.75, 0.85, 0.95),
 			Color(1, 0.95, 0.85), Vector3(0.3, 0.5, -0.8)))
-	var sun := DirectionalLight3D.new()
+	sun = DirectionalLight3D.new()
 	sun.transform.basis = Basis.looking_at(Vector3(-0.3, -0.7, -0.6), Vector3.UP)
 	parent.add_child(sun)
 
@@ -65,6 +79,8 @@ func apply_environment(env: Environment) -> void:
 ## Fills one stretch of path. The chunk covers local z from 0 (near end) to
 ## -length (far end); the same index must always give the same scenery.
 ## Return the chunk's gaze targets (if any) so the world can report them passing.
+## The chunk isn't in the scene yet while you fill it. To spread heavy work over
+## several frames, put `await next_frame()` between stages.
 func populate(chunk: Node3D, index: int, length: float) -> Array[TFXGazeTarget]:
 	if _grid_material == null:
 		var shader := Shader.new()
@@ -75,7 +91,34 @@ func populate(chunk: Node3D, index: int, length: float) -> Array[TFXGazeTarget]:
 	return []
 
 
+## Look switches this theme offers, shown in Settings. Each entry:
+## {"key": "wind", "label": "Trees sway in the wind", "default": true, "rebuild": false}
+## ("rebuild": true if the path must be rebuilt for the change to show).
+func get_options() -> Array[Dictionary]:
+	return []
+
+
+## Called when the player flips an option. Update materials here; options that
+## add or remove objects are picked up when the path is rebuilt.
+func set_option(key: String, value: bool) -> void:
+	options[key] = value
+
+
+func option(key: String) -> bool:
+	if options.has(key):
+		return options[key]
+	for o in get_options():
+		if o.key == key:
+			return o.get("default", false)
+	return false
+
+
 # --- Helpers for subclasses ------------------------------------------------------
+
+## Waits one frame (use inside populate() to spread the work).
+func next_frame() -> void:
+	await (Engine.get_main_loop() as SceneTree).process_frame
+
 
 ## A ground strip for one chunk. Shaders can use `instance uniform float
 ## path_offset` (distance along the path) so patterns line up across chunks.
@@ -85,6 +128,7 @@ func make_ground(material: Material, index: int, length: float, width: float) ->
 	_ground_mesh.center_offset = Vector3(0, 0, -length / 2.0)
 	ground.mesh = _ground_mesh
 	ground.material_override = material
+	ground.set_meta("tfx_no_shadow", true)   # receives shadows, doesn't cast them
 	# Wrapping keeps the shader's numbers small on long walks.
 	ground.set_instance_shader_parameter("path_offset", fmod(index * length, 2400.0))
 	return ground

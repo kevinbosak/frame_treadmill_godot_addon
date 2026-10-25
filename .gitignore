@@ -5,3 +5,6 @@
 
 # Exports
 build/
+
+# Performance logs recorded from the headset
+perf_log*.txt

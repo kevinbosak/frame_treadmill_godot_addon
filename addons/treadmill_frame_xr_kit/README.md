@@ -18,7 +18,8 @@ License: MIT (see `LICENSE`).
 | Stride calibration | `TFXStrideCalibration` | Learns step length per cadence from known treadmill speeds |
 | Treadmill footprint | `TFXFootprint` | Belt position and size from three touched points |
 | Safety bubble | `TFXPassthroughBubble` · `rig/` | See-through box around the treadmill in World view |
-| Settings screen | `TFXSettingsMenu` · `ui/` | Tabs: Treadmill, Stride, Display, Sound, Headset, plus your own |
+| Settings screen | `TFXSettingsMenu` · `ui/` | Tabs: Treadmill, Stride, Graphics, the theme's look, Sound, Headset, plus your own |
+| Graphics test bench | `TFXGraphics` · `graphics/` | Live graphics settings (edge smoothing, foveation, resolution, tone mapping, shadows, scenery density) and a GPU/CPU cost readout |
 | 3D UI + pointer | `TFXUiPanel3D`, `TFXPointer` | Any Control UI on a panel in 3D, with laser pointers |
 | Step graph | `TFXBobWaveform` | Live head bob graph on the walking panel |
 | Gaze | `TFXGazeTracker`, `TFXGazeTarget`, `TFXGazeReticle` · `gaze/` | What you're looking at (eyes, then head direction, then mouse), noticing by dwell, a reticle that never covers the target |
@@ -92,7 +93,9 @@ walking, **[ / ]** simulated cadence, **Up/Down** look, **C** calibrate. The mou
     use `make_sky_dome()`.
   - `apply_environment(env)`: fog, ambient light.
   - `populate(chunk, index, length) -> Array[TFXGazeTarget]`: one stretch of path, local z from 0
-    to −length. The same index must give the same scenery.
+    to −length. The same index must give the same scenery. The chunk is built outside the scene
+    and swapped in when done, so you can spread heavy work with `await next_frame()` and avoid a
+    hitch each time a stretch is recycled.
   - Helpers: `make_ground()` (shaders can use `instance uniform float path_offset`),
     `make_sky_dome()`, `add_multimesh()`.
 
@@ -128,6 +131,33 @@ bee.add_child(buzz)
 
 Use mono sound files for positional sounds; a stereo file can't be placed.
 
+### Graphics test bench
+Settings → **Graphics** changes these live and saves them in
+`user://treadmill_frame_xr_kit_graphics.cfg`. The settings panel stays usable in World view, so you
+can watch the effect.
+
+- **Readout** (top of the tab, and on the walking panel if enabled): GPU time per frame against the
+  frame budget (1000 ms ÷ refresh rate), **game code** time (every `_process` call, timed between
+  markers that run first and last each frame), the real **frame interval** (sits at the budget in
+  the headset; longer means missed frames), with peaks over the last 2 s, plus draw calls and
+  triangles. Godot's `TIME_PROCESS` monitor isn't used, because it reports the worst frame of the
+  last second.
+- **Log:** every 5 s a `[tfx perf]` line (averages and worst frames since the last line) and every
+  hitch (`[tfx hitch] 54 ms; just before: bird fly-by`) go to the log. Record it with
+  `adb logcat -s godot > perf_log.txt`. Mark events from your own code with
+  `TFXGraphics.note("boss appears")` so hitches can be traced to them.
+- **Defaults** come from Steam Frame measurements (GPU about half the 72 Hz budget with everything
+  on): 4× edge smoothing, medium foveation, sun shadows at 25 m, 2× scenery. **Reset graphics to
+  defaults** restores them after experimenting.
+- **Edge smoothing** (MSAA off/2×/4×), **foveated rendering** (off to high, if the runtime supports
+  it), **render resolution** (60–120%), **tone mapping**, **sun shadows** with **shadow distance**,
+  **scenery density** (0.5–4×, for `TFXPathWorld` themes).
+- **Theme look options** get their own tab, named after the theme. A theme lists them in
+  `get_options()` and reacts in `set_option()`; options marked `"rebuild": true` rebuild the path.
+  For shadows, a theme sets `sun` in `build_backdrop()`; geometry tagged
+  `set_meta("tfx_no_shadow", true)` never casts shadows.
+- From code: `rig.graphics.summary()`, `.gpu_ms`, `.cpu_ms`, `.budget_ms`, `.draw_calls`, `.primitives`.
+
 ### Settings screen
 ```gdscript
 var tab := rig.settings_menu.add_tab("My game")
@@ -138,10 +168,33 @@ rig.settings_menu.add_stepper(tab, "Enemies", 1, 1, 10, func() -> float: return 
 rig.settings_menu.add_button(tab, "Reset", reset)
 ```
 
+## Avoiding first-appearance stalls (warm-up)
+
+The first time a material is drawn, or a sound played, the GPU driver and audio system do one-time
+setup. On the Frame that measured about 50 ms, the first time a bird flew over. Register anything
+that first appears mid-walk:
+
+```gdscript
+rig.add_warm_up([MyCreature.new(), my_effect_scene.instantiate()], [preload("res://roar.wav")])
+```
+
+The first time World view turns on, with the world's lighting and shadows active, the rig draws
+them for a few frames, shrunk to 2 mm in front of the camera, and plays the sounds once at −80 dB.
+The kit's own late-appearing pieces (the settings panel and laser) are included automatically.
+Visuals don't process during warm-up and are freed afterwards.
+
+## Keeping the CPU light
+
+Per-frame work adds up on a headset CPU. The kit updates things only as often as they're noticed:
+walking panel text 5×/s (and only when it changes), the step graph 20×/s, and binaural cues 30×/s
+(skipping inaudible changes). The reticle only rebuilds when its look changes. Do the same in game
+code, especially for `Label3D` text, which rebuilds its geometry on every change.
+
 ## Rendering order (if you add transparent things)
 
 The bubble draws at render priority 100, after the world, so it can erase it. The walking panel
-(110–116), reticle (120) and prompts (127) draw on top of it with depth testing off. Keep your own
+(110–116), settings panel (115), reticle (120) and prompts (127) draw on top of it with depth
+testing off. Keep your own
 always-visible overlays above 100.
 
 ## Tests

@@ -5,8 +5,14 @@ extends Node3D
 ## Instance tfx_rig.tscn in your main scene. It brings the headset and controllers,
 ## passthrough, step counting and speed (TFXTreadmill), treadmill measuring, the
 ## see-through safety bubble, edge warnings, the walking panel (HUD), settings
-## screen, laser pointers, gaze tracking with a reticle, and sound: audio buses,
-## volumes, binaural positional audio (TFXSpatialSound) and footsteps.
+## screen, laser pointers, gaze tracking with a reticle, sound (audio buses,
+## volumes, binaural positional audio, footsteps) and a graphics test bench
+## (TFXGraphics: live settings plus a GPU/CPU readout).
+##
+## Warm-up: things that first appear mid-walk (a creature, an effect) can cause a
+## one-time stall while the GPU driver prepares their materials. Register them
+## with add_warm_up(); the first time World view turns on, the rig draws them
+## once (shrunk to invisible) and plays the sounds once (near silent).
 ##
 ## Your game provides the world: set `world_root` to the node to show in World
 ## view (a TFXPathWorld is lined up with the treadmill and fed the walking speed
@@ -23,6 +29,13 @@ extends Node3D
 
 signal view_changed(world_view: bool)
 signal treadmill_measured(footprint: TFXFootprint)
+
+## Refresh rate to ask for at startup (Hz), unless the player picked one in
+## Settings. Only used if the headset offers it to the app; otherwise the app
+## follows the headset's own setting (SteamOS VR settings).
+@export var preferred_refresh_rate := 90.0
+## Shown while World view is prepared for the first time.
+@export var preparing_text := "Preparing the world..."
 
 ## Controller buttons (OpenXR action names from the default action map).
 @export var settings_button := "by_button"
@@ -67,6 +80,7 @@ const MEASURE_STEPS := [
 @onready var hud_panel: MeshInstance3D = $Hud/Panel
 @onready var step_player: AudioStreamPlayer = $StepSound
 @onready var audio: TFXAudio = $Audio
+@onready var graphics: TFXGraphics = $Graphics
 
 var xr_interface: OpenXRInterface
 var xr_active := false
@@ -83,7 +97,22 @@ var _toast_timer := 0.0
 var _hud_placed := false
 var _time := 0.0
 var _haptic_timer := 0.0
+var _hud_wait := 0.0
+var _fade := MeshInstance3D.new()
+var _fade_material := StandardMaterial3D.new()
+var _world_prepared := false
+var _preparing := false
+var _warm_visuals: Array[Node3D] = []
+var _warm_sounds: Array[AudioStream] = []
+var _warmed := false
+
+## How many frames the warm-up objects are drawn for.
+const WARM_UP_FRAMES := 12
 var _default_env: Environment
+
+## Walking panel text updates per second. Changing 3D text is costly, and a few
+## updates a second reads just as well.
+const HUD_RATE := 5.0
 
 
 func _ready() -> void:
@@ -102,12 +131,16 @@ func _ready() -> void:
 	treadmill.camera = xr_camera
 	treadmill.settings_changed.connect(_on_settings_changed)
 
+	graphics.xr = xr_interface if xr_active else null
+	graphics.world_env = world_env
+	graphics.apply()
 	settings_menu.treadmill = treadmill
+	settings_menu.graphics = graphics
 	settings_menu.xr = xr_interface if xr_active else null
 	settings_menu.eye = eye_gaze
 	settings_menu.close_requested.connect(close_settings)
 	settings_menu.measure_requested.connect(start_measuring)
-	settings_panel.setup(settings_menu, Vector2i(900, 1000))
+	settings_panel.setup(settings_menu, Vector2i(1000, 1060))
 	settings_panel.visible = false
 	add_child(settings_panel)
 
@@ -125,6 +158,7 @@ func _ready() -> void:
 	_apply_sound_settings()
 
 	_default_env = world_env.environment.duplicate()
+	_build_fade()
 	set_world_view(false)
 
 
@@ -146,7 +180,10 @@ func _process(delta: float) -> void:
 		_toast_timer -= delta
 		if _toast_timer <= 0.0 and not measuring:
 			prompt.visible = false
-	_refresh_hud()
+	_hud_wait -= delta
+	if _hud_wait <= 0.0 and hud.visible:
+		_hud_wait = 1.0 / HUD_RATE
+		_refresh_hud()
 
 
 # --- Views -----------------------------------------------------------------------
@@ -156,8 +193,7 @@ func _on_session_begun() -> void:
 		xr_interface.set_environment_blend_mode(XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND)
 	else:
 		toast("Passthrough isn't available")
-	if treadmill.refresh_rate > 0.0:
-		xr_interface.set_display_refresh_rate(treadmill.refresh_rate)
+	_request_refresh_rate()
 	if OS.get_name() == "Android":
 		# Asks for the eye-tracking permissions listed in the export preset.
 		get_tree().on_request_permissions_result.connect(_on_permission_result)
@@ -165,6 +201,23 @@ func _on_session_begun() -> void:
 	# Shows up in `adb logcat -s godot` for troubleshooting.
 	for line in TFXSettingsMenu.headset_report(xr_interface, eye_gaze):
 		print("[headset] ", line)
+
+
+## Asks for the player's chosen refresh rate, or preferred_refresh_rate, if the
+## headset offers it to the app. Otherwise keeps the headset's own setting.
+func _request_refresh_rate() -> void:
+	var wanted := treadmill.refresh_rate if treadmill.refresh_rate > 0.0 else preferred_refresh_rate
+	var offered := xr_interface.get_available_display_refresh_rates()
+	for rate in offered:
+		if absf(rate - wanted) < 1.0:
+			xr_interface.set_display_refresh_rate(rate)
+			print("[headset] refresh rate set to %d Hz" % roundi(rate))
+			return
+	var names: PackedStringArray = []
+	for rate in offered:
+		names.append(str(roundi(rate)))
+	print("[headset] %d Hz isn't offered to the app (offered: %s); running at the headset's setting, %d Hz. Change it in SteamOS VR settings." % [
+			roundi(wanted), ", ".join(names) if names.size() > 0 else "none", roundi(xr_interface.get_display_refresh_rate())])
 
 
 func _on_permission_result(permission: String, granted: bool) -> void:
@@ -185,12 +238,26 @@ func _apply_background() -> void:
 func set_world_root(node: Node3D) -> void:
 	world_root = node
 	if is_node_ready():
+		var path := node as TFXPathWorld
+		graphics.path_world = path
+		settings_menu.set_theme_options(path.theme if path else null)
 		set_world_view(world_view)
 
 
 ## Switches between Passthrough (false) and World (true) view.
 ## World view needs a measured treadmill, so the safety bubble can be placed.
+## The first time, it fades to dark while the world is drawn for the first time
+## (a one-off cost that can freeze the picture for up to a second).
 func set_world_view(on: bool) -> void:
+	if _preparing:
+		return
+	if on and not world_view and not _world_prepared and treadmill.footprint.is_valid() and world_root:
+		_prepare_world()
+		return
+	_apply_world_view(on)
+
+
+func _apply_world_view(on: bool) -> void:
 	if on and not treadmill.footprint.is_valid():
 		toast("Measure your treadmill first:\nopen settings > Measure treadmill")
 		on = false
@@ -216,7 +283,111 @@ func set_world_view(on: bool) -> void:
 		env.ambient_light_energy = _default_env.ambient_light_energy
 	audio.set_world_audible(on)
 	if changed:
+		TFXGraphics.note("world view on" if on else "world view off")
 		view_changed.emit(on)
+
+
+## First switch into World view: fade to dark, turn the world on (and warm up)
+## behind the dark screen, wait until frames run smoothly, then fade in.
+func _prepare_world() -> void:
+	_preparing = true
+	TFXGraphics.note("preparing world")
+	await _fade_to(1.0, 0.25)
+	_show_prompt(preparing_text)
+	_apply_world_view(true)
+	_world_prepared = true
+	if not _warmed:
+		_run_warm_up()
+	var waited := 0.0
+	var smooth := 0
+	while waited < 4.0 and (waited < 0.4 or smooth < 15):
+		await get_tree().process_frame
+		waited += get_process_delta_time()
+		var ok := graphics.last_frame_interval_ms() < graphics.budget_ms * 1.5
+		smooth = smooth + 1 if ok else 0
+	prompt.visible = false
+	await _fade_to(0.0, 0.4)
+	_preparing = false
+
+
+## A dark screen fixed to your view, for fades. It draws over everything except
+## the prompt text.
+func _build_fade() -> void:
+	var quad := QuadMesh.new()
+	quad.size = Vector2(3.0, 3.0)
+	_fade_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_fade_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_fade_material.no_depth_test = true
+	_fade_material.disable_fog = true
+	_fade_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_fade_material.albedo_color = Color(0.02, 0.025, 0.04, 0.0)
+	_fade_material.render_priority = 125   # over the HUD (116) and reticle (120), under the prompt (127)
+	quad.material = _fade_material
+	_fade.mesh = quad
+	_fade.position = Vector3(0, 0, -0.25)
+	_fade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_fade.visible = false
+	xr_camera.add_child(_fade)
+
+
+func _fade_to(alpha: float, seconds: float) -> void:
+	_fade.visible = true
+	var tween := create_tween()
+	tween.tween_method(func(a: float) -> void: _fade_material.albedo_color.a = a,
+			_fade_material.albedo_color.a, alpha, seconds)
+	await tween.finished
+	_fade.visible = alpha > 0.0
+
+
+## Registers things to draw and play once, the first time World view turns on,
+## so their one-time setup happens then rather than mid-walk. The rig takes
+## ownership of the visuals (they're freed afterwards); they don't process.
+func add_warm_up(visuals: Array, sounds: Array = []) -> void:
+	for v in visuals:
+		_warm_visuals.append(v)
+	for s in sounds:
+		_warm_sounds.append(s)
+	if world_view and _warmed:
+		_warmed = false
+		_run_warm_up()
+
+
+func _run_warm_up() -> void:
+	_warmed = true
+	TFXGraphics.note("warm-up")
+	var holder := Node3D.new()
+	holder.process_mode = Node.PROCESS_MODE_DISABLED
+	holder.position = Vector3(0, 0, -0.6)
+	holder.scale = Vector3.ONE * 0.002   # in view, so it's drawn, but far too small to see
+	xr_camera.add_child(holder)
+	# The kit's own late-appearing pieces: the settings panel and the laser.
+	var kit_meshes: Array[Mesh] = []
+	var panel_quad := QuadMesh.new()
+	panel_quad.material = settings_panel.panel_material()
+	kit_meshes.append(panel_quad)
+	kit_meshes.append_array((controllers[0].get_node("Pointer") as TFXPointer).meshes())
+	for m in kit_meshes:
+		var mi := MeshInstance3D.new()
+		mi.mesh = m
+		holder.add_child(mi)
+	for v in _warm_visuals:
+		holder.add_child(v)
+	_warm_visuals.clear()
+	var players: Array[AudioStreamPlayer] = []
+	for s in _warm_sounds:
+		var p := AudioStreamPlayer.new()
+		p.stream = s
+		p.bus = TFXAudio.WARMUP
+		p.volume_db = -80.0
+		add_child(p)
+		p.play()
+		players.append(p)
+	_warm_sounds.clear()
+	for i in WARM_UP_FRAMES:
+		await get_tree().process_frame
+	holder.queue_free()
+	for p in players:
+		p.queue_free()
 
 
 func _on_settings_changed() -> void:
@@ -234,8 +405,8 @@ func _apply_sound_settings() -> void:
 # --- Settings ----------------------------------------------------------------------
 
 func open_settings() -> void:
-	# Settings are used in the real room, so the menu never hides in the bubble.
-	set_world_view(false)
+	# The panel draws on top of the see-through bubble, so World view can stay
+	# on (handy for judging graphics settings).
 	var head := xr_camera.global_position
 	var fwd := _flat_forward()
 	var pos := head + Vector3(fwd.x, 0.0, fwd.y) * MENU_DISTANCE
@@ -243,6 +414,7 @@ func open_settings() -> void:
 	settings_panel.global_transform = Transform3D(Basis(Vector3.UP, atan2(-fwd.x, -fwd.y)), pos)
 	settings_menu.refresh()
 	settings_panel.visible = true
+	TFXGraphics.note("settings opened")
 	hud.visible = false  # the menu shows live cadence itself
 	menu_open = true
 
@@ -349,19 +521,23 @@ func _refresh_hud() -> void:
 	var d := treadmill.detector
 	if d.cadence_spm > 0.0:
 		var mph := treadmill.speed_mph()
-		readout.text = "%d spm\n%.1f mph   %s /mi" % [roundi(d.cadence_spm), mph, _format_pace(mph)]
+		_set_text(readout, "%d spm\n%.1f mph   %s /mi" % [roundi(d.cadence_spm), mph, _format_pace(mph)])
 	else:
-		readout.text = "-- spm\nstart walking"
-	readout.modulate = Color(1, 0.4, 0.35) if warning.visible else Color.WHITE
+		_set_text(readout, "-- spm\nstart walking")
 
 	var stride := "default stride" if treadmill.calibration.points.is_empty() \
 			else "%d calibration point(s)" % treadmill.calibration.points.size()
 	var lines: PackedStringArray = [
 		"Steps %d    Bob %.1f cm    %s" % [d.step_count, d.amplitude * 100.0, stride],
 		"Today %.2f mi    All time %.1f mi    %d fps" % [treadmill.session_distance / METRES_PER_MILE,
-				treadmill.lifetime_distance / METRES_PER_MILE, Engine.get_frames_per_second()],
+				treadmill.lifetime_distance / METRES_PER_MILE, roundi(Engine.get_frames_per_second())],
 		"Gaze: %s" % gaze.source,
 	]
+	if graphics.show_performance:
+		lines.append(graphics.summary())
+		var hitch := graphics.hitch_summary()
+		if hitch != "":
+			lines.append(hitch)
 	lines.append_array(hud_extra_lines)
 	lines.append("%s settings    %s: %s view    %s quick calibrate" % [
 			_button_label(settings_button), _button_label(view_button),
@@ -370,7 +546,7 @@ func _refresh_hud() -> void:
 		lines.append("Treadmill not measured yet: open settings")
 	if treadmill.sim_walking:
 		lines.append("SIMULATED WALKING  %d spm" % roundi(treadmill.sim_cadence))
-	info.text = "\n".join(lines)
+	_set_text(info, "\n".join(lines))
 	waveform.visible = treadmill.show_step_graph
 	hud_panel.scale.y = 1.0 if treadmill.show_step_graph else 0.75
 	hud_panel.position.y = 0.0 if treadmill.show_step_graph else 0.1
@@ -378,8 +554,10 @@ func _refresh_hud() -> void:
 
 func _update_warning(delta: float) -> void:
 	var msg := treadmill.edge_warning
-	warning.text = msg
-	warning.visible = msg != ""
+	if warning.text != msg:
+		warning.text = msg
+		warning.visible = msg != ""
+		readout.modulate = Color(1, 0.4, 0.35) if warning.visible else Color.WHITE
 	if msg != "" and xr_active:
 		_haptic_timer -= delta
 		if _haptic_timer <= 0.0:
@@ -416,6 +594,12 @@ func _add_gaze_depth_surface() -> void:
 	shape.shape = box
 	area.add_child(shape)
 	hud_panel.add_child(area)
+
+
+## Only touches the label when the text really changed (rebuilding 3D text costs).
+static func _set_text(label: Label3D, text: String) -> void:
+	if label.text != text:
+		label.text = text
 
 
 static func _format_pace(mph: float) -> String:

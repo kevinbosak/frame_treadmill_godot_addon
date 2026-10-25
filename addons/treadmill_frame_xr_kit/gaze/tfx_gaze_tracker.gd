@@ -54,9 +54,10 @@ func _process(delta: float) -> void:
 	_have_dir = true
 
 	var tolerance := HEAD_TOLERANCE_DEG if source == "head direction" else TOLERANCE_DEG
-	current = pick(origin, gaze_dir, get_tree().get_nodes_in_group(TFXGazeTarget.GROUP), tolerance)
+	var targets := get_tree().get_nodes_in_group(TFXGazeTarget.GROUP)
+	current = pick(origin, gaze_dir, targets, tolerance)
 
-	for node in get_tree().get_nodes_in_group(TFXGazeTarget.GROUP):
+	for node in targets:
 		var t := node as TFXGazeTarget
 		if t and t.update_dwell(delta, t == current):
 			target_noticed.emit(t)

@@ -21,26 +21,38 @@ func fly(from: Vector3, to: Vector3, speed: float) -> void:
 	look_at(to, Vector3.UP)
 
 
+static var _material: StandardMaterial3D
+static var _body_mesh: SphereMesh
+static var _wing_mesh: QuadMesh
+
+
+## Shared by every bird, so a new bird never needs new GPU resources.
+static func _shared() -> void:
+	if _material:
+		return
+	_material = StandardMaterial3D.new()
+	_material.albedo_color = Color(0.15, 0.13, 0.12)
+	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_body_mesh = SphereMesh.new()
+	_body_mesh.radius = 0.06
+	_body_mesh.height = 0.2
+	_body_mesh.radial_segments = 6
+	_body_mesh.rings = 3
+	_body_mesh.material = _material
+	_wing_mesh = QuadMesh.new()
+	_wing_mesh.size = Vector2(0.22, 0.09)
+	_wing_mesh.material = _material
+
+
 func _ready() -> void:
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.15, 0.13, 0.12)
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_shared()
 	var body := MeshInstance3D.new()
-	var body_mesh := SphereMesh.new()
-	body_mesh.radius = 0.06
-	body_mesh.height = 0.2
-	body_mesh.radial_segments = 6
-	body_mesh.rings = 3
-	body_mesh.material = mat
-	body.mesh = body_mesh
+	body.mesh = _body_mesh
 	body.rotation.x = PI / 2
 	add_child(body)
-	var wing_mesh := QuadMesh.new()
-	wing_mesh.size = Vector2(0.22, 0.09)
-	wing_mesh.material = mat
 	for side in [-1.0, 1.0]:
 		var pivot := MeshInstance3D.new()
-		pivot.mesh = wing_mesh
+		pivot.mesh = _wing_mesh
 		pivot.rotation.x = -PI / 2
 		pivot.position.x = side * 0.11
 		add_child(pivot)

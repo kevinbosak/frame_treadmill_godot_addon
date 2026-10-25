@@ -2,7 +2,8 @@ class_name TFXSettingsMenu
 extends PanelContainer
 ## Treadmill Frame XR Kit: the settings screen.
 ##
-## Built-in tabs: Treadmill, Stride, Display, Sound and Headset; kit settings are saved
+## Built-in tabs: Treadmill, Stride, Graphics, Sound and Headset, plus a tab
+## for the current path theme's look options; kit settings are saved
 ## on the headset at once. Games add their own tabs with add_tab() and fill them
 ## with add_heading(), add_label(), add_button(), add_toggle() and add_stepper()
 ## (game settings are the game's to save).
@@ -13,6 +14,7 @@ signal measure_requested
 const FONT_SIZE := 26
 
 var treadmill: TFXTreadmill
+var graphics: TFXGraphics
 ## Set by the scene in the headset (null in the desktop preview).
 var xr: OpenXRInterface
 var eye: XRController3D
@@ -25,6 +27,8 @@ var _calib_result: Label
 var _points_label: Label
 var _headset_label: Label
 var _headset_timer := 0.0
+var _perf_label: Label
+var _theme_tab: Control
 
 
 func _ready() -> void:
@@ -53,13 +57,13 @@ func _ready() -> void:
 	var tabs := TabContainer.new()
 	_tabs = tabs
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	tabs.add_theme_font_size_override("font_size", 28)
+	tabs.add_theme_font_size_override("font_size", 24)
 	# Roomy tabs, so they're easy to hit with the laser.
 	for style_name in ["tab_selected", "tab_unselected", "tab_hovered"]:
 		var tab_style := StyleBoxFlat.new()
 		tab_style.set_content_margin_all(14)
-		tab_style.content_margin_left = 26
-		tab_style.content_margin_right = 26
+		tab_style.content_margin_left = 16
+		tab_style.content_margin_right = 16
 		tab_style.bg_color = Color(0.2, 0.32, 0.45) if style_name == "tab_selected" \
 				else Color(0.12, 0.15, 0.2) if style_name == "tab_unselected" else Color(0.16, 0.22, 0.3)
 		tab_style.set_corner_radius_all(8)
@@ -67,7 +71,7 @@ func _ready() -> void:
 	col.add_child(tabs)
 	_build_treadmill_tab(_tab(tabs, "Treadmill"))
 	_build_stride_tab(_tab(tabs, "Stride"))
-	_build_display_tab(_tab(tabs, "Display"))
+	_build_graphics_tab(_tab(tabs, "Graphics"))
 	_build_sound_tab(_tab(tabs, "Sound"))
 	_build_headset_tab(_tab(tabs, "Headset"))
 
@@ -113,12 +117,80 @@ func _build_stride_tab(tab: VBoxContainer) -> void:
 		_calib_result.text = "Calibration cleared"))
 
 
-func _build_display_tab(tab: VBoxContainer) -> void:
-	_heading(tab, "Display")
+func _build_graphics_tab(tab: VBoxContainer) -> void:
+	_perf_label = _label(tab, "")
+	_perf_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.55))
+	var g := graphics
+	var apply := func() -> void:
+		g.apply()
+		g.save_settings()
+	_stepper(tab, "Edge smoothing (MSAA)", 2.0, 0.0, 4.0,
+			func() -> float: return g.msaa,
+			func(v: float) -> void:
+				g.msaa = int(v)
+				apply.call(),
+			func(v: float) -> String: return "Off" if v < 1.0 else "%dx" % int(v), false)
+	_stepper(tab, "Foveated rendering", 1.0, 0.0, 3.0,
+			func() -> float: return g.foveation,
+			func(v: float) -> void:
+				g.foveation = int(v)
+				apply.call(),
+			func(v: float) -> String:
+				return TFXGraphics.FOVEATION_NAMES[int(v)] + ("" if g.is_foveation_supported() else " (n/a)"), false)
+	_stepper(tab, "Render resolution", 0.1, 0.6, 1.2,
+			func() -> float: return g.render_scale,
+			func(v: float) -> void:
+				g.render_scale = v
+				apply.call(), _percent, false)
+	_stepper(tab, "Tone mapping", 1.0, 0.0, 4.0,
+			func() -> float: return g.tonemap,
+			func(v: float) -> void:
+				g.tonemap = int(v)
+				apply.call(),
+			func(v: float) -> String: return TFXGraphics.TONEMAP_NAMES[int(v)], false)
+	var shadow_toggle := _toggle(tab, "Sun shadows", g.shadows, func(on: bool) -> void:
+		g.shadows = on
+		apply.call(), false)
+	_refreshers.append(func() -> void: shadow_toggle.set_pressed_no_signal(g.shadows))
+	_stepper(tab, "Shadow distance", 5.0, 10.0, 80.0,
+			func() -> float: return g.shadow_distance,
+			func(v: float) -> void:
+				g.shadow_distance = v
+				apply.call(),
+			func(v: float) -> String: return "%d m" % int(v), false)
+	_stepper(tab, "Scenery density", 0.5, 0.5, 4.0,
+			func() -> float: return g.density,
+			func(v: float) -> void:
+				g.density = v
+				apply.call(),
+			func(v: float) -> String: return "%.1fx" % v, false)
+	_toggle(tab, "Show performance on walking panel", g.show_performance, func(on: bool) -> void:
+		g.show_performance = on
+		g.save_settings(), false)
 	_toggle(tab, "Show step graph", treadmill.show_step_graph,
 			func(on: bool) -> void: treadmill.show_step_graph = on)
 	_toggle(tab, "Show gaze reticle", treadmill.show_reticle,
 			func(on: bool) -> void: treadmill.show_reticle = on)
+	_button_in(tab, "Reset graphics to defaults", func() -> void:
+		g.reset_to_defaults()
+		refresh())
+
+
+## Adds (or replaces) the tab of switches the current path theme offers.
+func set_theme_options(theme: TFXPathTheme) -> void:
+	if _theme_tab:
+		_theme_tab.queue_free()
+		_theme_tab = null
+	if theme == null or theme.get_options().is_empty():
+		return
+	var tab := _tab(_tabs, theme.display_name)
+	_theme_tab = tab.get_parent()
+	_tabs.move_child(_theme_tab, 3)   # right after Graphics
+	_heading(tab, "%s look" % theme.display_name)
+	_label(tab, "Each switch shows its cost in the Graphics tab's readout.")
+	for o in theme.get_options():
+		_toggle(tab, o.label, theme.option(o.key), func(on: bool) -> void:
+			graphics.set_theme_option(o.key, on), false)
 
 
 func _build_sound_tab(tab: VBoxContainer) -> void:
@@ -144,7 +216,7 @@ func _build_sound_tab(tab: VBoxContainer) -> void:
 
 func _build_headset_tab(tab: VBoxContainer) -> void:
 	_heading(tab, "Refresh rate")
-	_label(tab, "Higher is smoother but gives each frame less time. Watch the fps on the walking panel.")
+	_label(tab, "Higher is smoother but gives each frame less time. If only one rate is listed, change it in SteamOS's VR settings; the app follows the headset.")
 	var row := HBoxContainer.new()
 	var l := Label.new()
 	l.text = "Display refresh rate"
@@ -179,8 +251,11 @@ func _process(delta: float) -> void:
 					"steady - ready to calibrate" if d.is_stable() else "settling..."]
 	_headset_timer -= delta
 	if _headset_timer <= 0.0 and _headset_label:
-		_headset_timer = 0.5
+		_headset_timer = 0.25
 		_headset_label.text = "\n".join(headset_report(xr, eye))
+		if _perf_label and graphics:
+			var hitch := graphics.hitch_summary()
+			_perf_label.text = graphics.summary() + ("\n" + hitch if hitch != "" else "")
 
 
 ## Plain-language status of everything eye tracking depends on.
@@ -288,6 +363,12 @@ func _toggle(parent: Container, text: String, on: bool, setter: Callable,
 			treadmill.save_settings())
 	parent.add_child(t)
 	return t
+
+
+func _button_in(parent: Container, text: String, action: Callable) -> Button:
+	var b := _button(text, action)
+	parent.add_child(b)
+	return b
 
 
 func _button(text: String, action: Callable) -> Button:

@@ -58,9 +58,28 @@ Headphones or the Frame's built-in speakers both work.
 The sounds are synthesised by `demo/sounds/generate_sounds.py` (numpy + scipy). Replace any `.wav`
 there with a real recording of the same name; use mono for positional sounds.
 
+## Graphics test bench
+
+**Settings → Graphics** has a live cost readout (GPU and CPU time per frame against the frame
+budget, draw calls, triangles) and settings that apply at once:
+
+- edge smoothing
+- foveated rendering
+- render resolution
+- tone mapping
+- sun shadows and shadow distance
+- scenery density
+
+The **Forest** tab switches the demo's look options on and off: tree shading, wind sway, soft fake
+shadows under trees, ground detail, and real lantern lights.
+
+Settings stay open in World view, so you can see the effect. Try each change, and compare the GPU
+figure with the budget, which is 13.9 ms at 72 Hz.
+
 ## Still to check on the treadmill
 
 - Step counting and speed against the treadmill's display (step graph on the walking panel).
 - See-through area position and height; edge warning distances.
 - Whether the treadmill measurement survives an app restart.
 - Whether you can locate the bee and the birds by sound alone, especially in front versus behind.
+- GPU time with each graphics setting: what fits in the budget at 72 Hz (and at 90 Hz if offered)?

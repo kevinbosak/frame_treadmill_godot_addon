@@ -36,12 +36,14 @@ var _orbit_angle := 0.0
 var _orbit_left := 0.0
 var _orbit_dir := 1.0
 var _time := 0.0
-var _visual := Node3D.new()
+var _visual: Node3D
 var _wings: Array[MeshInstance3D] = []
 
 
-func _ready() -> void:
-	add_child(_visual)
+## The bee's body and wings (wings are named "Wing0" and "Wing1"). Static, so a
+## copy can be handed to the rig's warm-up.
+static func build_visual() -> Node3D:
+	var visual := Node3D.new()
 	var body := MeshInstance3D.new()
 	var body_mesh := SphereMesh.new()
 	body_mesh.radius = 0.012
@@ -53,7 +55,7 @@ func _ready() -> void:
 	body_mesh.material = fur
 	body.mesh = body_mesh
 	body.rotation.x = PI / 2
-	_visual.add_child(body)
+	visual.add_child(body)
 	var band := MeshInstance3D.new()
 	var band_mesh := CylinderMesh.new()
 	band_mesh.top_radius = 0.0125
@@ -66,7 +68,7 @@ func _ready() -> void:
 	band.mesh = band_mesh
 	band.rotation.x = PI / 2
 	band.position.z = 0.005
-	_visual.add_child(band)
+	visual.add_child(band)
 	var wing_mesh := QuadMesh.new()
 	wing_mesh.size = Vector2(0.022, 0.012)
 	var wing_mat := StandardMaterial3D.new()
@@ -74,13 +76,21 @@ func _ready() -> void:
 	wing_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	wing_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	wing_mesh.material = wing_mat
-	for side in [-1.0, 1.0]:
+	for i in 2:
 		var wing := MeshInstance3D.new()
+		wing.name = "Wing%d" % i
 		wing.mesh = wing_mesh
-		wing.position = Vector3(side * 0.013, 0.008, -0.002)
+		wing.position = Vector3((-1.0 if i == 0 else 1.0) * 0.013, 0.008, -0.002)
 		wing.rotation.x = -PI / 2
-		_visual.add_child(wing)
-		_wings.append(wing)
+		visual.add_child(wing)
+	return visual
+
+
+func _ready() -> void:
+	_visual = build_visual()
+	add_child(_visual)
+	for i in 2:
+		_wings.append(_visual.get_node("Wing%d" % i) as MeshInstance3D)
 
 	buzz.stream = DemoSounds.BEE
 	buzz.unit_size = 1.2
@@ -143,6 +153,7 @@ func _process(delta: float) -> void:
 
 func _start_visit(head: Vector3) -> void:
 	_set_present(true)
+	TFXGraphics.note("bee visit")
 	_target.noticed = false     # it can be found again on every visit
 	_target.dwell = 0.0
 	if randf() < 0.5:

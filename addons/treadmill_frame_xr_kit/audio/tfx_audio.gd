@@ -18,6 +18,8 @@ extends Node
 const AMBIENCE := &"TFX Ambience"
 const WORLD := &"TFX World"
 const EFFECTS := &"TFX Effects"
+## Near-silent bus used to play sounds once during warm-up.
+const WARMUP := &"TFX Warmup"
 ## How many sounds can have binaural cues at once; the rest play as plain 3D sound.
 const POOL_SIZE := 12
 
@@ -28,6 +30,7 @@ static var instance: TFXAudio
 var binaural_enabled := true
 
 var _free: Array[StringName] = []
+var _effects := {}   # bus name -> [AudioEffectDelay, AudioEffectLowPassFilter]
 
 
 func _enter_tree() -> void:
@@ -44,6 +47,7 @@ func _setup_buses() -> void:
 	_ensure_bus(AMBIENCE, &"Master")
 	var world := _ensure_bus(WORLD, &"Master")
 	_ensure_bus(EFFECTS, &"Master")
+	AudioServer.set_bus_volume_db(_ensure_bus(WARMUP, &"Master"), -80.0)
 	if AudioServer.get_bus_effect_count(world) == 0:
 		var reverb := AudioEffectReverb.new()
 		reverb.room_size = 0.7
@@ -71,6 +75,7 @@ func _setup_buses() -> void:
 			var shadow := AudioEffectLowPassFilter.new()
 			shadow.cutoff_hz = 20000.0
 			AudioServer.add_bus_effect(idx, shadow)
+		_effects[bus_name] = [AudioServer.get_bus_effect(idx, 0), AudioServer.get_bus_effect(idx, 1)]
 		_free.append(bus_name)
 
 
@@ -97,11 +102,11 @@ func release_binaural_bus(bus_name: StringName) -> void:
 
 ## Sets one binaural bus: per-ear delays (ms) and the head-shadow cutoff (Hz).
 func apply_cues(bus_name: StringName, left_ms: float, right_ms: float, cutoff_hz: float) -> void:
-	var idx := AudioServer.get_bus_index(bus_name)
-	if idx == -1:
+	var fx: Array = _effects.get(bus_name, [])
+	if fx.is_empty():
 		return
-	var delay := AudioServer.get_bus_effect(idx, 0) as AudioEffectDelay
-	var shadow := AudioServer.get_bus_effect(idx, 1) as AudioEffectLowPassFilter
+	var delay := fx[0] as AudioEffectDelay
+	var shadow := fx[1] as AudioEffectLowPassFilter
 	delay.tap1_delay_ms = left_ms
 	delay.tap2_delay_ms = right_ms
 	shadow.cutoff_hz = cutoff_hz

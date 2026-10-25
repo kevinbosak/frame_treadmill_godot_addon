@@ -3,7 +3,8 @@ extends TFXPathTheme
 ## Demo theme: "dusk forest road", with rune-marked waystones for the gaze test,
 ## songbirds in the trees and crickets in the grass (positional sound).
 ## An example TFXPathTheme subclass: overrides build_backdrop(),
-## apply_environment() and populate(), and uses the base class helpers.
+## apply_environment() and populate(), uses the base class helpers, and offers
+## look options for the graphics test bench (Settings → Forest).
 
 const SKY_TOP := Color(0.16, 0.18, 0.40)
 const SKY_HORIZON := Color(0.93, 0.60, 0.46)
@@ -12,6 +13,46 @@ const FOG_DENSITY := 0.022
 const SUN_DIR := Vector3(-0.45, 0.16, -0.88)     # towards the sun: low, ahead-left
 const SUN_COLOR := Color(1.0, 0.72, 0.5)
 const AMBIENT := Color(0.42, 0.42, 0.62)
+
+## Trees: colour from the instance, plus optional fake light (darker undersides
+## and bases) and wind sway, both done per vertex so they're cheap.
+const PLANT_SHADER := """shader_type spatial;
+render_mode specular_disabled;
+
+uniform float shading = 1.0;
+uniform float wind = 1.0;
+varying float shade;
+
+void vertex() {
+	vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	vec3 root = MODEL_MATRIX[3].xyz;
+	float h = max(world.y, 0.0);
+	float phase = root.x * 0.37 + root.z * 0.23;
+	vec3 sway = vec3(sin(TIME * 1.3 + phase), 0.0, cos(TIME * 1.1 + phase * 1.3) * 0.6)
+			* wind * 0.05 * h * h / 16.0;
+	VERTEX += inverse(mat3(MODEL_MATRIX)) * sway;
+	vec3 n = normalize(mat3(MODEL_MATRIX) * NORMAL);
+	float sky = 0.62 + 0.38 * (n.y * 0.5 + 0.5);
+	float ground = mix(0.72, 1.0, smoothstep(0.0, 1.2, h));
+	shade = mix(1.0, sky * ground * 1.08, shading);
+}
+
+void fragment() {
+	ALBEDO = COLOR.rgb * shade;
+	ROUGHNESS = 1.0;
+}
+"""
+
+## Soft dark circles under trees: a cheap stand-in for real shadows.
+const BLOB_SHADER := """shader_type spatial;
+render_mode unshaded, depth_draw_never, cull_disabled, shadows_disabled;
+
+void fragment() {
+	float d = length(UV - 0.5) * 2.0;
+	ALBEDO = vec3(0.02, 0.03, 0.02);
+	ALPHA = 0.45 * (1.0 - smoothstep(0.3, 1.0, d));
+}
+"""
 
 const ROAD_HALF_WIDTH := 1.5
 const GROUND_WIDTH := 160.0
@@ -25,6 +66,7 @@ uniform vec3 grass_b : source_color = vec3(0.27, 0.36, 0.17);
 uniform vec3 dirt_a : source_color = vec3(0.36, 0.27, 0.19);
 uniform vec3 dirt_b : source_color = vec3(0.50, 0.40, 0.28);
 uniform float road_half_width = 1.5;
+uniform float detail = 1.0;
 
 varying vec2 p;
 
@@ -50,13 +92,23 @@ void fragment() {
 	vec3 dirt = mix(dirt_a, dirt_b, noise(p * 3.0) * 0.7 + n * 0.3);
 	float rut = smoothstep(0.14, 0.0, abs(abs(p.x) - 0.65)) * 0.22;
 	dirt *= 1.0 - rut;
-	ALBEDO = mix(grass, dirt, road);
+	vec3 col = mix(grass, dirt, road);
+	if (detail > 0.5) {
+		// Fine detail for close up: grass streaks and pebbles. Extra work per pixel.
+		float blades = noise(vec2(p.x * 40.0, p.y * 9.0)) * noise(p * 23.0);
+		float pebbles = smoothstep(0.82, 0.9, noise(p * 14.0)) * road;
+		col *= 0.85 + 0.3 * mix(blades, 0.5, road);
+		col = mix(col, vec3(0.62, 0.58, 0.52), pebbles * 0.6);
+	}
+	ALBEDO = col;
 	ROUGHNESS = 1.0;
 }
 """
 
 var ground_material := ShaderMaterial.new()
-var plant_material := StandardMaterial3D.new()
+var plant_material := ShaderMaterial.new()
+var blob_material := ShaderMaterial.new()
+var blob_mesh := QuadMesh.new()
 var lantern_material := StandardMaterial3D.new()
 var trunk_mesh := CylinderMesh.new()
 var cone_mesh := CylinderMesh.new()
@@ -72,8 +124,16 @@ func _init() -> void:
 	ground_material.shader = gs
 	ground_material.set_shader_parameter("road_half_width", ROAD_HALF_WIDTH)
 
-	plant_material.vertex_color_use_as_albedo = true
-	plant_material.roughness = 1.0
+	display_name = "Forest"
+	var ps := Shader.new()
+	ps.code = PLANT_SHADER
+	plant_material.shader = ps
+	var bs := Shader.new()
+	bs.code = BLOB_SHADER
+	blob_material.shader = bs
+	blob_mesh.size = Vector2(1, 1)
+	blob_mesh.orientation = PlaneMesh.FACE_Y
+	_update_materials()
 	lantern_material.albedo_color = Color(1.0, 0.75, 0.4)
 	lantern_material.emission_enabled = true
 	lantern_material.emission = Color(1.0, 0.65, 0.3)
@@ -124,7 +184,7 @@ func build_backdrop(parent: Node3D) -> void:
 		colors.append(SKY_TOP.lerp(SKY_HORIZON, rng.randf_range(0.35, 0.6)).darkened(0.25))
 	add_multimesh(parent, cone_mesh, xforms, colors, mountain_mat)
 
-	var sun := DirectionalLight3D.new()
+	sun = DirectionalLight3D.new()
 	sun.light_color = SUN_COLOR
 	sun.light_energy = 1.1
 	sun.shadow_enabled = false
@@ -157,7 +217,10 @@ func populate(chunk: Node3D, index: int, length: float) -> Array[TFXGazeTarget]:
 	var rounds: Array[Transform3D] = []
 	var round_colors: Array[Color] = []
 
-	for i in 46:
+	var blobs: Array[Transform3D] = []
+	for i in roundi(46 * density):
+		if i % 24 == 23:
+			await next_frame()   # a few dozen trees per frame keeps each frame light
 		var side := -1.0 if rng.randf() < 0.5 else 1.0
 		var x := side * (3.6 + pow(rng.randf(), 1.7) * 55.0)
 		var z := -rng.randf() * length
@@ -166,6 +229,9 @@ func populate(chunk: Node3D, index: int, length: float) -> Array[TFXGazeTarget]:
 		trunks.append(Transform3D(Basis.from_scale(Vector3(1, trunk_h, 1) * (h / 5.0 + 0.4)),
 				Vector3(x, trunk_h * (h / 5.0 + 0.4) / 2.0, z)))
 		trunk_colors.append(Color(0.30, 0.21, 0.15).darkened(rng.randf() * 0.3))
+		if absf(x) < 30.0:
+			var r := h * 0.45
+			blobs.append(Transform3D(Basis.from_scale(Vector3(r, 1, r)), Vector3(x, 0.03, z)))
 		var green := Color(0.13, 0.30, 0.18).lerp(Color(0.25, 0.38, 0.16), rng.randf())
 		if rng.randf() < 0.7:
 			# Pine: stacked cones.
@@ -183,23 +249,30 @@ func populate(chunk: Node3D, index: int, length: float) -> Array[TFXGazeTarget]:
 
 	var rocks: Array[Transform3D] = []
 	var rock_colors: Array[Color] = []
-	for i in 14:
+	for i in roundi(14 * density):
 		var side := -1.0 if rng.randf() < 0.5 else 1.0
 		var s := rng.randf_range(0.15, 0.7)
 		rocks.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s * 1.3, s * 0.6, s)),
 				Vector3(side * rng.randf_range(2.0, 14.0), s * 0.15, -rng.randf() * length)))
 		rock_colors.append(Color(0.42, 0.40, 0.42).darkened(rng.randf() * 0.3))
-	for i in 18:
+	for i in roundi(18 * density):
 		var side := -1.0 if rng.randf() < 0.5 else 1.0
 		var s := rng.randf_range(0.25, 0.6)
 		rounds.append(Transform3D(Basis.from_scale(Vector3(s * 1.4, s, s * 1.4)),
 				Vector3(side * rng.randf_range(2.2, 9.0), s * 0.5, -rng.randf() * length)))
 		round_colors.append(Color(0.18, 0.32, 0.15).lerp(Color(0.3, 0.38, 0.18), rng.randf()))
 
+	await next_frame()   # spread the work: trees, then the rest
 	add_multimesh(chunk, trunk_mesh, trunks, trunk_colors, plant_material)
 	add_multimesh(chunk, cone_mesh, leaves, leaf_colors, plant_material)
 	add_multimesh(chunk, round_mesh, rounds, round_colors, plant_material)
 	add_multimesh(chunk, rock_mesh, rocks, rock_colors, plant_material)
+	if option("blob_shadows") and not blobs.is_empty():
+		var blob_colors: Array[Color] = []
+		blob_colors.resize(blobs.size())
+		blob_colors.fill(Color.WHITE)
+		add_multimesh(chunk, blob_mesh, blobs, blob_colors, blob_material)
+		chunk.get_child(chunk.get_child_count() - 1).set_meta("tfx_no_shadow", true)
 
 	# A lantern post every stretch, alternating sides: the "lantern road".
 	var side := 1.0 if index % 2 == 0 else -1.0
@@ -213,7 +286,15 @@ func populate(chunk: Node3D, index: int, length: float) -> Array[TFXGazeTarget]:
 	lantern.material_override = lantern_material
 	lantern.position = Vector3(side * 2.1, 1.6, -length * 0.5)
 	chunk.add_child(lantern)
+	if option("lantern_lights"):
+		var light := OmniLight3D.new()
+		light.light_color = Color(1.0, 0.7, 0.4)
+		light.light_energy = 1.5
+		light.omni_range = 7.0
+		light.position = lantern.position
+		chunk.add_child(light)
 
+	await next_frame()
 	_add_sounds(chunk, rng, length)
 	return [_waystone(chunk, rng, length)]
 
@@ -237,6 +318,27 @@ func _add_sounds(chunk: Node3D, rng: RandomNumberGenerator, length: float) -> vo
 		bird.position = Vector3(side * rng.randf_range(5.0, 18.0), rng.randf_range(3.0, 6.0),
 				-rng.randf() * length)
 		chunk.add_child(bird)
+
+
+func get_options() -> Array[Dictionary]:
+	return [
+		{"key": "tree_shading", "label": "Tree shading (darker undersides and bases)", "default": true},
+		{"key": "wind", "label": "Trees sway in the wind", "default": true},
+		{"key": "blob_shadows", "label": "Soft shadows under trees (fake, cheap)", "default": true, "rebuild": true},
+		{"key": "ground_detail", "label": "Ground detail close up (more work per pixel)", "default": true},
+		{"key": "lantern_lights", "label": "Lanterns cast real light (costly)", "default": false, "rebuild": true},
+	]
+
+
+func set_option(key: String, value: bool) -> void:
+	super(key, value)
+	_update_materials()
+
+
+func _update_materials() -> void:
+	plant_material.set_shader_parameter("shading", 1.0 if option("tree_shading") else 0.0)
+	plant_material.set_shader_parameter("wind", 1.0 if option("wind") else 0.0)
+	ground_material.set_shader_parameter("detail", 1.0 if option("ground_detail") else 0.0)
 
 
 ## Eye-tracking test object: a rune-marked stone, sometimes obvious, sometimes hidden.

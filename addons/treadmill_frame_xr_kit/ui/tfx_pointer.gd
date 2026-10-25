@@ -59,6 +59,11 @@ func _process(_delta: float) -> void:
 	_dot.visible = hovered != null
 
 
+## The beam and dot meshes (used to warm them up before they're first shown).
+func meshes() -> Array[Mesh]:
+	return [_beam.mesh, _dot.mesh]
+
+
 ## Sends a trigger press or release to the panel being pointed at.
 ## Returns true if a panel took it.
 func press(pressed: bool) -> bool:

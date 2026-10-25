@@ -33,6 +33,7 @@ func _process(delta: float) -> void:
 		var dir := Vector3.FORWARD.rotated(Vector3.UP, randf() * TAU)
 		_distant.global_position = head + dir * randf_range(20.0, 40.0) + Vector3.UP * randf_range(3.0, 8.0)
 		_distant.stream = DemoSounds.OWL if randf() < 0.5 else DemoSounds.WOODPECKER
+		TFXGraphics.note("distant owl" if _distant.stream == DemoSounds.OWL else "distant woodpecker")
 		_distant.pitch_scale = randf_range(0.95, 1.05)
 		_distant.play()
 		_distant_wait = randf_range(15.0, 35.0)
@@ -43,6 +44,7 @@ func _spawn_flyby() -> void:
 	var toward := Vector3.FORWARD.rotated(Vector3.UP, randf() * TAU)
 	var across := toward.cross(Vector3.UP).normalized()
 	var mid := head + toward * randf_range(4.0, 14.0) + Vector3.UP * randf_range(5.0, 10.0)
+	TFXGraphics.note("bird fly-by")
 	var bird := DemoFlybyBird.new()
 	add_child(bird)
 	bird.fly(mid - across * 45.0, mid + across * 45.0, randf_range(8.0, 11.0))

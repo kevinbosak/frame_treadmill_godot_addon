@@ -18,6 +18,8 @@ var passed := 0
 
 func _ready() -> void:
 	world.setup(DemoForestTheme.new())
+	rig.preparing_text = "Preparing the forest..."
+
 	rig.world_root = world
 	rig.gaze.target_noticed.connect(_on_target_noticed)
 	world.target_passed.connect(func(_t: TFXGazeTarget) -> void: passed += 1)
@@ -29,6 +31,11 @@ func _ready() -> void:
 	var wildlife := DemoWildlife.new()
 	wildlife.rig = rig
 	world.add_child(wildlife)
+	# Things that first appear mid-walk: warm them up when World view first turns
+	# on, so they don't cause a stall the first time they show up.
+	var sounds: Array = [DemoSounds.BEE, DemoSounds.CRICKET, DemoSounds.OWL, DemoSounds.WOODPECKER]
+	sounds.append_array(DemoSounds.BIRD_CALLS)
+	rig.add_warm_up([DemoFlybyBird.new(), DemoBee.build_visual()], sounds)
 
 	var menu := rig.settings_menu
 	var tab := menu.add_tab("Demo")

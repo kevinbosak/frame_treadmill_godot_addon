@@ -33,6 +33,9 @@ func setup(content: Control, size_px: Vector2i) -> void:
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_texture = viewport.get_texture()
+	# Draw on top of the see-through bubble, so the panel can be used in World view.
+	mat.no_depth_test = true
+	mat.render_priority = TFXPassthroughBubble.RENDER_PRIORITY + 15
 	_quad.material_override = mat
 	add_child(_quad)
 
@@ -46,6 +49,11 @@ func setup(content: Control, size_px: Vector2i) -> void:
 	_area.set_meta("ui_panel", self)
 	add_child(_area)
 	_update_active()
+
+
+## The panel's material (used to warm it up before it's first shown).
+func panel_material() -> Material:
+	return _quad.material_override
 
 
 func _notification(what: int) -> void:
